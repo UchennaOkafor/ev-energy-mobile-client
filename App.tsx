@@ -2,62 +2,54 @@ import { StatusBar } from 'expo-status-bar';
 import {
   ActivityIndicator,
   Alert,
+  Button,
+  Linking,
   SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PointOfInterestItem } from './app/models/point-of-interest-item';
 import * as Location from 'expo-location';
 import { PublicChargerPointList } from './app/components/public-charger-point-list';
 import { fetchChargingPointsByDistance, startChargingSession } from './app/api';
+import { AppState } from './app/models/app-state';
 
 export default function App() {
   const [chargingItems, setChargingItems] = useState<PointOfInterestItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [currentChargingPoint, setCurrentChargingPoint] =
     useState<PointOfInterestItem | null>(null);
+  const [appState, setAppState] = useState<AppState>(AppState.Loading);
 
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function getCurrentLocation() {
-      // let enabled = await Location.hasServicesEnabledAsync();
-      // console.log('Enabled', enabled);
-
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-      setLocation(location);
+  const appStatusMessage = useMemo(() => {
+    switch (appState) {
+      case AppState.Loading:
+        return 'Finding nearby chargers...';
+      case AppState.LocationPermissionDenied:
+        return 'Permission to access location was denied';
+      case AppState.Error:
+        return 'Error';
+      default:
+        return null;
     }
-
-    getCurrentLocation();
-  }, []);
-
-  let text = 'Waiting...';
-  if (errorMsg) {
-    text = errorMsg;
-  } else if (location) {
-    text = JSON.stringify(location);
-  }
+  }, [appState]);
 
   useEffect(() => {
     const initialize = async () => {
-      const location = await Location.getCurrentPositionAsync();
-      console.log(location);
+      const location = await getCurrentLocation();
+      if (!location) {
+        setAppState(AppState.LocationPermissionDenied);
+        return;
+      }
 
       const data = await fetchChargingPointsByDistance(
         location.coords.latitude,
         location.coords.longitude
       );
+
       setChargingItems(data);
-      setIsLoading(false);
+      setAppState(AppState.Ready);
     };
     initialize();
   }, []);
@@ -72,7 +64,7 @@ export default function App() {
           Alert.alert('Failed to start charging session');
         }
       } else {
-        Alert.alert('Charger is not operational');
+        Alert.alert('Charger is offline');
       }
     },
     [setCurrentChargingPoint]
@@ -82,10 +74,18 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="auto" />
       <Text style={styles.title}>ev.energy - Nearby chargers</Text>
-      {isLoading ? (
+      {appState !== AppState.Ready ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator />
-          <Text style={styles.loadingText}>Finding nearby chargers...</Text>
+          {appState === AppState.Loading && <ActivityIndicator />}
+          {!!appState && (
+            <Text style={styles.appStatusMessage}>{appStatusMessage}</Text>
+          )}
+          {appState === AppState.LocationPermissionDenied && (
+            <Button
+              title="Grant location permission"
+              onPress={() => Linking.openSettings()}
+            />
+          )}
         </View>
       ) : (
         <PublicChargerPointList
@@ -97,6 +97,15 @@ export default function App() {
       )}
     </SafeAreaView>
   );
+
+  async function getCurrentLocation() {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      return null;
+    }
+
+    return await Location.getCurrentPositionAsync({});
+  }
 }
 
 const styles = StyleSheet.create({
@@ -120,7 +129,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  loadingText: {
+  appStatusMessage: {
     fontSize: 18,
     fontWeight: '300',
   },
