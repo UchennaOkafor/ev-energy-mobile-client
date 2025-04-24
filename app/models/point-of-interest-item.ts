@@ -193,7 +193,7 @@ export interface AddressInfo2 {
   ContactEmail?: string;
   AccessComments?: string;
   RelatedURL?: string;
-  Distance: any;
+  Distance: number;
   DistanceUnit: number;
   Title?: string;
 }
